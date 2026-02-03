@@ -11,7 +11,8 @@ class Frontier(object):
     def __init__(self, config, restart):
         self.logger = get_logger("FRONTIER")
         self.config = config
-        self.to_be_downloaded = list()
+        self.to_be_downloaded = []
+        self.lock = RLock()
         
         if not os.path.exists(self.config.save_file) and not restart:
             # Save file does not exist, but request to load save.
@@ -48,18 +49,20 @@ class Frontier(object):
             f"total urls discovered.")
 
     def get_tbd_url(self):
-        try:
-            return self.to_be_downloaded.pop()
-        except IndexError:
-            return None
+        with self.lock:
+            try:
+                return self.to_be_downloaded.pop(0)
+            except IndexError:
+                return None
 
     def add_url(self, url):
-        url = normalize(url)
-        urlhash = get_urlhash(url)
-        if urlhash not in self.save:
-            self.save[urlhash] = (url, False)
-            self.save.sync()
-            self.to_be_downloaded.append(url)
+        with self.lock:
+            url = normalize(url)
+            urlhash = get_urlhash(url)
+            if urlhash not in self.save:
+                self.save[urlhash] = (url, False)
+                self.save.sync()
+                self.to_be_downloaded.append(url)
     
     def mark_url_complete(self, url):
         urlhash = get_urlhash(url)
@@ -70,3 +73,4 @@ class Frontier(object):
 
         self.save[urlhash] = (url, True)
         self.save.sync()
+

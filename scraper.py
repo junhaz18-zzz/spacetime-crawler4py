@@ -1,5 +1,6 @@
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
+from html.parser import HTMLParser
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
@@ -77,4 +78,5 @@ def is_valid(url):
     except TypeError:
         print ("TypeError for ", parsed)
         raise
+
 

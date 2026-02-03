@@ -15,7 +15,46 @@ def extract_next_links(url, resp):
     #         resp.raw_response.url: the url, again
     #         resp.raw_response.content: the content of the page!
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
-    return list()
+    if resp.status != 200:
+        return list()
+    if not resp.raw_response or not resp.raw_response.content:
+        return list()
+    try:
+        html_content = resp.raw_response.content.decode('utf-8') # convert byte to string for HTML parsing
+    except Exception:
+        return list()
+    
+    parser = LinkParser(resp.url) #passing resp.url ensures relative links are calculated from the correct folder
+    try:
+        parser.feed(html_content)
+    except Exception: # for malformed html
+        return list()
+    return parser.output_links
+
+class LinkParser(HTMLParser):
+    """Helper class for parsing HTML Link"""
+    def __init__(self, base_url):
+        super().__init__()
+        self.base_url = base_url
+        self.output_links = []
+
+    def handle_starttag(self, tag, attr):
+        if tag != 'a': # only tag <a> contains link
+            return
+        attributes = dict(attr)
+        # Convert list of tuples [('href', 'url')...] to dict {'href': 'url'}
+        href = attributes.get('href')
+        if href:
+            clean_link = self._clean_url(href)
+            if clean_link:
+                self.output_links.append(clean_link)
+    
+    def _clean_url(self, raw_url):
+        """Helper to normalize URL"""
+        absolute_url = urljoin(self.base_url, raw_url)
+        parsed = urlparse(absolute_url)
+        # Removes the framgement (#) of a URL.
+        return parsed._replace(fragment="").geturl()
 
 def is_valid(url):
     # Decide whether to crawl this url or not. 
@@ -38,3 +77,4 @@ def is_valid(url):
     except TypeError:
         print ("TypeError for ", parsed)
         raise
+

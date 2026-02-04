@@ -5,14 +5,20 @@ from utils.server_registration import get_cache_server
 from utils.config import Config
 from crawler import Crawler
 
+import analytics
+
 
 def main(config_file, restart):
     cparser = ConfigParser()
     cparser.read(config_file)
     config = Config(cparser)
     config.cache_server = get_cache_server(config, restart)
+
     crawler = Crawler(config, restart)
     crawler.start()
+
+    analytics.write_report("report.txt")
+    analytics.print_report()
 
 
 if __name__ == "__main__":

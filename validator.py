@@ -27,14 +27,18 @@ BLOCKED_EXTENSIONS = (
     # 样式和脚本
     ".css", ".js",
     # 图片
-    ".bmp", ".gif", ".jpg", ".jpeg", ".png", ".tiff", ".ico", ".svg", ".webp",
+    ".bmp", ".gif", ".jpg", ".jpeg", ".png", ".tiff", ".ico", ".svg", ".webp", ".psd",
     # 音视频
-    ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".ogg", ".webm",
+    ".mp2", ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".ogg", ".webm", ".m4v" ".mpeg", 
+    ".ogg", ".ogv", ".webm", ".mid", ".ram", ".rm", ".wma", ".smil", ".swf",
     # 文档
-    ".pdf", ".ps", ".eps",
+    ".pdf", ".ps", ".eps", ".tex",
     ".ppt", ".pptx", ".doc", ".docx", ".xls", ".xlsx", ".odt", ".ods", ".odp",
+    ".names", ".data",
+    ".rtf", ".csv", ".arff",
     # 压缩文件
-    ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz",
+    ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".tgz", ".xz", ".msi", ".exe", ".bin", 
+    ".dmg", ".iso", ".apk", ".deb", ".rpm", ".dll", ".cnf",
     # 可执行文件和安装包
     ".exe", ".dmg", ".iso", ".apk", ".deb", ".rpm", ".msi",
     # 数据文件
@@ -42,7 +46,7 @@ BLOCKED_EXTENSIONS = (
     # 代码文件（通常不是我们要爬的网页）
     ".py", ".java", ".c", ".cpp", ".h", ".r", ".m", ".mat",
     # 其他
-    ".war", ".jar",
+    ".war", ".jar", ".sha1", ".thmx", ".mso",
 )
 
 # Trap-related keywords: 完全阻止这些参数

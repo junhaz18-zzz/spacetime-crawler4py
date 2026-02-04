@@ -29,7 +29,7 @@ BLOCKED_EXTENSIONS = (
     # 图片
     ".bmp", ".gif", ".jpg", ".jpeg", ".png", ".tiff", ".ico", ".svg", ".webp", ".psd",
     # 音视频
-    ".mp2", ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".ogg", ".webm", ".m4v" ".mpeg", 
+    ".mp2", ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".ogg", ".webm", ".m4v", ".mpeg", 
     ".ogg", ".ogv", ".webm", ".mid", ".ram", ".rm", ".wma", ".smil", ".swf",
     # 文档
     ".pdf", ".ps", ".eps", ".tex",

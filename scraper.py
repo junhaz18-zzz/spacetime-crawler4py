@@ -36,6 +36,17 @@ def extract_next_links(url, resp):
     except Exception:
         soup = BeautifulSoup(resp.raw_response.content, "html.parser")
 
+    # Detect Low information & 潜在404网页
+
+    text = soup.get_text(separator=' ', strip=True)
+    word_count = len(text.split())
+    if word_count < 45: # 多少word合适？
+        return []
+    
+    text_lower = text.lower()
+    if "page not found" in text_lower or "no results found" in text_lower:
+        return []
+
     extracted = set()
 
     for a in soup.find_all("a", href=True):

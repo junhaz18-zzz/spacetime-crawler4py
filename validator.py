@@ -19,7 +19,10 @@ BLOCKED_EXTENSIONS = (
     ".ppt", ".pptx", ".doc", ".docx", ".xls", ".xlsx", ".odt", ".ods", ".odp",
     ".rtf", ".csv", ".arff",
     ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".tgz", ".xz",
-    ".msi", ".exe", ".bin", ".dmg", ".iso", ".apk", ".deb", ".rpm", ".dll",
+    ".msi", ".exe", ".bin", ".dmg", ".iso", ".apk", ".deb", ".rpm", ".dll", ".woff", ".woff2", ".ttf", ".eot", ".otf", 
+    ".ics", ".rss", ".atom", ".xml", ".json", ".yaml", ".yml", ".sql", ".db", ".sqlite", ".log", ".dat", 
+    ".c", ".cpp", ".h", ".hpp", ".java", ".py", ".sh", ".bash", ".ipynb", 
+    ".jar", ".war", ".class", ".bak", ".tmp", ".swp"
 )
 
 # Hard-block tracking/session keys (almost always useless duplicates)
@@ -27,6 +30,13 @@ HARD_BLOCK_QUERY_KEYS = {
     "replytocom", "share",
     "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
     "session", "sid", "phpsessid", "jsessionid",
+    "do",
+    "rev",
+    "image",     
+    "tab_files",  
+    "tab_details", 
+    # List sorting
+    "sort", "order"
 }
 
 # Pagination keys: allow within limits

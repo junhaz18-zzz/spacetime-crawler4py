@@ -37,17 +37,24 @@ class Worker(Thread):
                 f"using cache {self.config.cache_server}."
             )
 
+            should_scrape = True
+
             # analytics (best-effort)
             try:
                 if resp.status == 200 and resp.raw_response and resp.raw_response.content:
-                    analytics_mod.process_page(tbd_url, resp.raw_response.content)
+                    # UPDATED: process_page returns False if it's a near-duplicate
+                    should_scrape = analytics_mod.process_page(tbd_url, resp.raw_response.content)
             except Exception as e:
                 self.logger.error(f"Analytics error on {tbd_url}: {e}")
 
-            scraped_urls = scraper.scraper(tbd_url, resp)
-            self.logger.info(f"Scraped {len(scraped_urls)} urls from {tbd_url}")
+            # NEW: Only scrape if it is NOT a duplicate
+            if should_scrape:
+                scraped_urls = scraper.scraper(tbd_url, resp)
+                self.logger.info(f"Scraped {len(scraped_urls)} urls from {tbd_url}")
 
-            for scraped_url in scraped_urls:
-                self.frontier.add_url(scraped_url)
+                for scraped_url in scraped_urls:
+                    self.frontier.add_url(scraped_url)
+            else:
+                self.logger.info(f"Skipped scraping {tbd_url} (Near-Duplicate detected)")
 
             self.frontier.mark_url_complete(tbd_url)

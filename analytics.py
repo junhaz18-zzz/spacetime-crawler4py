@@ -1,4 +1,5 @@
 import re
+import hashlib
 from collections import Counter
 from threading import RLock
 from urllib.parse import urlparse, urldefrag
@@ -33,6 +34,65 @@ _subdomain_counter = Counter()    # uci.edu 下每个 hostname 的 unique pages 
 _longest_url = None
 _longest_word_count = 0
 
+# --- SIMHASH GLOBALS ---
+_simhash_fingerprints = []
+_near_duplicate_count = 0
+
+
+# --- SIMHASH 运用 ---
+
+def _get_hash(token, bits=64):
+    """Returns a hash integer of the token."""
+    h = hashlib.md5(token.encode("utf-8")).hexdigest()
+    return int(h, 16) & ((1 << bits) - 1)
+
+def _compute_simhash(tokens, bits=64):
+    """
+    Calculates the Simhash fingerprint using Word Frequency as weights.
+    """
+    if not tokens:
+        return 0
+    
+    # Calculate Weights (Frequency)
+    word_weights = Counter(tokens)
+    
+    # Initialize vector V
+    v = [0] * bits
+    
+    for word, weight in word_weights.items():
+        # Generate Hash
+        h = _get_hash(word, bits)
+        
+        for i in range(bits):
+            # Update Vector V
+            if h & (1 << i):
+                v[i] += weight
+            else:
+                v[i] -= weight
+                
+    # Generate Fingerprint
+    fingerprint = 0
+    for i in range(bits):
+        if v[i] > 0:
+            fingerprint |= (1 << i)
+            
+    return fingerprint
+
+def _hamming_distance(f1, f2):
+    """Counts how many bits differ between f1 and f2."""
+    x = f1 ^ f2
+    return bin(x).count('1')
+
+def _is_near_duplicate(fingerprint, threshold=2): 
+    """
+    Checks if the fingerprint is similar to any existing one.
+    Threshold=0 Exact Duplicate. Threshold=1-3 Near Duplicate.
+    """
+    for existing_fp in _simhash_fingerprints:
+        if _hamming_distance(fingerprint, existing_fp) <= threshold:
+            return True
+    return False
+
 
 def _html_to_text(html_content: bytes) -> str:
     """HTML -> 纯文本（markup 不算 words）。"""
@@ -48,7 +108,7 @@ def _html_to_text(html_content: bytes) -> str:
     return soup.get_text(separator=" ", strip=True)
 
 
-def process_page(url: str, html_content: bytes) -> None:
+def process_page(url: str, html_content: bytes) -> bool:
     """
     Worker 每抓到一个 200 页面就调用一次。
     负责更新：
@@ -56,11 +116,15 @@ def process_page(url: str, html_content: bytes) -> None:
       - longest page by word count
       - top 50 words（stopwords ignored）
       - subdomain stats under uci.edu
+      - CHECK SIMHASH DUPLICATES
+      
+    Returns:
+      bool: True if page is new (should scrape), False if duplicate.
     """
-    global _longest_url, _longest_word_count
+    global _longest_url, _longest_word_count, _near_duplicate_count
 
     if not url:
-        return
+        return False
 
     # defragment
     url, _ = urldefrag(url)
@@ -70,10 +134,16 @@ def process_page(url: str, html_content: bytes) -> None:
     # tokenize
     tokens = re.findall(r"[a-zA-Z0-9]+", text.lower())
     tokens = [t for t in tokens if t not in STOP_WORDS and len(t) > 1]
+    
+    # Calculate Simhash (Frequency Weighted)
+    fingerprint = _compute_simhash(tokens)
+    
     wc = len(tokens)
 
     parsed = urlparse(url)
     host = (parsed.netloc or "").lower().split(":")[0]
+    
+    should_scrape = True
 
     with _lock:
         # unique pages
@@ -91,6 +161,15 @@ def process_page(url: str, html_content: bytes) -> None:
 
         # global word freq
         _word_counter.update(tokens)
+        
+        # Check for Near-Duplicates (Simhash)
+        if _is_near_duplicate(fingerprint):
+            _near_duplicate_count += 1
+            should_scrape = False  # Signal to Worker: Do not extract links!
+        else:
+            _simhash_fingerprints.append(fingerprint)
+
+    return should_scrape
 
 
 def finalize_report():
@@ -101,20 +180,22 @@ def finalize_report():
         longest_wc = _longest_word_count
         top_50 = _word_counter.most_common(50)
         subdomains = dict(_subdomain_counter)
+        near_dupes = _near_duplicate_count
 
-    return unique_pages, longest_url, longest_wc, top_50, subdomains
+    return unique_pages, longest_url, longest_wc, top_50, subdomains, near_dupes
 
 
 def write_report(filepath: str = "report.txt") -> None:
-    unique_pages, longest_url, longest_wc, top_50, subdomains = finalize_report()
+    unique_pages, longest_url, longest_wc, top_50, subdomains, near_dupes = finalize_report()
 
     lines = []
     lines.append(f"1. Unique pages: {unique_pages}")
     lines.append(f"2. Longest page: {longest_url} ({longest_wc} words)")
-    lines.append("3. Top 50 words:")
+    lines.append(f"3. Near-duplicate pages found: {near_dupes}")
+    lines.append("4. Top 50 words:")
     for w, c in top_50:
         lines.append(f"   {w}: {c}")
-    lines.append("4. Subdomains in uci.edu (alphabetical):")
+    lines.append("5. Subdomains in uci.edu (alphabetical):")
     for sd in sorted(subdomains.keys()):
         lines.append(f"   {sd}, {subdomains[sd]}")
 
@@ -123,11 +204,12 @@ def write_report(filepath: str = "report.txt") -> None:
 
 
 def print_report() -> None:
-    unique_pages, longest_url, longest_wc, top_50, subdomains = finalize_report()
+    unique_pages, longest_url, longest_wc, top_50, subdomains, near_dupes = finalize_report()
 
     print("-" * 40)
     print(f"Unique pages: {unique_pages}")
     print(f"Longest Page: {longest_url} ({longest_wc} words)")
+    print(f"Near-duplicates: {near_dupes}")
     print("-" * 40)
     print("Top 50 Most Common Words:")
     for w, c in top_50:

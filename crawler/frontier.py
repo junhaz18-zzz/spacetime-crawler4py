@@ -71,6 +71,16 @@ class Frontier(object):
                     save.sync()
                     self.to_be_downloaded.append(url)
 
+    def get_next_url(self):
+        while True:
+            with self.lock:
+                if not self.to_be_downloaded:
+                    return None
+                url = self.to_be_downloaded.pop(0)
+    
+            self.wait_for_politeness(url, logger=self.logger)
+            return url
+
     def mark_url_complete(self, url):
         urlhash = get_urlhash(url)
 
@@ -116,3 +126,4 @@ class Frontier(object):
 
         if wait > 0:
             time.sleep(wait)
+

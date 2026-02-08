@@ -1,20 +1,18 @@
 import re
-from urllib.parse import urljoin, urldefrag
+from urllib.parse import urljoin, urldefrag, urlparse
 
 from bs4 import BeautifulSoup
-
-# IMPORTANT:
-# 按作业要求，你应该在 scraper.py 里实现/修改 is_valid
-# 下面先保留导入，若你已有 validator.py 并且老师允许，也可继续用；
-# 但建议你把 validator.is_valid 的逻辑挪到这里，避免不符合 spec。
 from validator import is_valid
+
+
+_BAD_HOST_HINTS = (
+    "your_ip", "localhost", "127.0.0.1", "::1"
+)
 
 
 def scraper(url, resp):
     raw_links = extract_next_links(url, resp)
-    valid_links = [link for link in raw_links if is_valid(link)]
-    return valid_links
-
+    return [link for link in raw_links if is_valid(link)]
 
 
 def extract_next_links(url, resp):
@@ -24,48 +22,71 @@ def extract_next_links(url, resp):
     if not resp.raw_response or not resp.raw_response.content:
         return []
 
+    content = resp.raw_response.content
+
     # Avoid very large files (>10MB)
-    if len(resp.raw_response.content) > 10 * 1024 * 1024:
+    if len(content) > 10 * 1024 * 1024:
         return []
 
     base_url = resp.url if resp.url else url
 
-    try:
-        # 如果 lxml 没装，BeautifulSoup 会退回内置 html.parser
-        soup = BeautifulSoup(resp.raw_response.content, "lxml")
-    except Exception:
-        soup = BeautifulSoup(resp.raw_response.content, "html.parser")
+    # Decode ourselves to avoid BS/lxml "REPLACEMENT CHARACTER" spam
+    if isinstance(content, (bytes, bytearray)):
+        html = content.decode("utf-8", errors="replace")
+    else:
+        html = str(content)
 
-    # Detect Low information & 潜在404网页
+    # parser choice: html.parser is stable; lxml may not be installed everywhere
+    soup = BeautifulSoup(html, "html.parser")
 
-    text = soup.get_text(separator=' ', strip=True)
+    # Low-info / soft-404 filter (keep, but make it less aggressive if you want coverage)
+    text = soup.get_text(separator=" ", strip=True)
     word_count = len(text.split())
-    if word_count < 45: # 多少word合适？
+    if word_count < 20:
         return []
-    
-    text_lower = text.lower()
-    if "page not found" in text_lower or "no results found" in text_lower:
+
+    tl = text.lower()
+    if "page not found" in tl or "no results found" in tl:
         return []
 
     extracted = set()
 
     for a in soup.find_all("a", href=True):
-        href = a.get("href", "").strip()
+        href = a.get("href", "")
+        if not href:
+            continue
+        href = href.strip()
         if not href:
             continue
 
-        # Drop non-web links early
         low = href.lower()
-        if low.startswith("mailto:") or low.startswith("javascript:") or low.startswith("tel:"):
+        if low.startswith(("mailto:", "javascript:", "tel:")):
             continue
 
-        abs_url = urljoin(base_url, href)
+        # quick drop placeholder IPv6-bracket style or bad hints
+        if "your_ip" in low:
+            continue
 
-        # Defragment (required by spec)
+        try:
+            abs_url = urljoin(base_url, href)
+        except ValueError:
+            # e.g. http://[YOUR_IP]/... triggers strict IPv6 validation
+            continue
+
         abs_url, _frag = urldefrag(abs_url)
-
-        # Optional normalization: strip trailing spaces
         abs_url = abs_url.strip()
+        if not abs_url:
+            continue
+
+        # another quick safety: drop bracketed netloc placeholders
+        try:
+            host = urlparse(abs_url).netloc.lower()
+            if any(h in host for h in _BAD_HOST_HINTS):
+                continue
+            if "[" in host or "]" in host:
+                continue
+        except Exception:
+            continue
 
         extracted.add(abs_url)
 

@@ -14,7 +14,6 @@ class Worker(Thread):
         self.config = config
         self.frontier = frontier
 
-        # Enforce assignment restriction
         assert {getsource(scraper).find(req) for req in {"import requests", "from requests import"}} == {-1}
         assert {getsource(scraper).find(req) for req in {"import urllib.request", "from urllib.request import"}} == {-1}
 
@@ -22,17 +21,26 @@ class Worker(Thread):
         while True:
             url = self.frontier.get_tbd_url()
             if url is None:
+                self.logger.info("Frontier is empty. Stopping Crawler.")
                 break
 
             resp = download(url, self.config, self.logger)
+            self.logger.info(
+                f"Downloaded {url}, status <{resp.status}>, using cache {self.config.cache_server}."
+            )
 
+            should_scrape = True
             try:
                 if resp.status == 200 and resp.raw_response and resp.raw_response.content:
-                    analytics_mod.process_page(url, resp.raw_response.content)
+                    should_scrape = analytics_mod.process_page(url, resp.raw_response.content)
             except Exception as e:
                 self.logger.error(f"Analytics error on {url}: {e}")
 
-            for new_url in scraper.scraper(url, resp):
-                self.frontier.add_url(new_url)
+            if should_scrape:
+                scraped = scraper.scraper(url, resp)
+                self.logger.info(f"Scraped {len(scraped)} urls from {url}")
+                for new_url in scraped:
+                    self.frontier.add_url(new_url)
 
             self.frontier.mark_url_complete(url)
+

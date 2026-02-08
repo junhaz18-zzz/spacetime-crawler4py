@@ -14,14 +14,11 @@ class Frontier(object):
         self.logger = get_logger("FRONTIER")
         self.config = config
 
-        # Thread-safe frontier queue
         self.to_be_downloaded = Queue()
         self.lock = RLock()
 
-        # Per-domain politeness tracking
         self._domain_next_allowed = {}
 
-        # Handle restart / resume
         if restart and os.path.exists(self.config.save_file):
             self.logger.info(f"Restart enabled. Deleting {self.config.save_file}.")
             os.remove(self.config.save_file)
@@ -36,7 +33,6 @@ class Frontier(object):
                     self.add_url(url)
 
     def _open_save(self):
-        # Open shelve on demand (thread-safe usage)
         return shelve.open(self.config.save_file)
 
     def _load_from_save(self):
@@ -74,17 +70,27 @@ class Frontier(object):
 
     def _wait_for_politeness(self, url):
         try:
-            host = urlparse(url).netloc.lower()
+            host = urlparse(url).netloc.lower().split(":")[0]
         except Exception:
             host = ""
 
+        # canonicalize: treat www.* as same site bucket
+        if host.startswith("www."):
+            host = host[4:]
+
         delay = getattr(self.config, "time_delay", 0.5)
+        if not delay or delay <= 0:
+            delay = 0.5
+
         now = time.monotonic()
 
         with self.lock:
             next_allowed = self._domain_next_allowed.get(host, 0.0)
             wait_time = max(0.0, next_allowed - now)
             self._domain_next_allowed[host] = max(now, next_allowed) + delay
+
+        wait_ms = int(wait_time * 1000)
+        self.logger.info(f"Politeness: domain={host}, sleep_ms={wait_ms}")
 
         if wait_time > 0:
             time.sleep(wait_time)

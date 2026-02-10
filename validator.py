@@ -8,6 +8,33 @@ ALLOWED_DOMAINS = (
     "stat.uci.edu",
 )
 
+# Block whole subdomains / host patterns that are clearly low-value for this assignment
+# (repos, wikis, infra dashboards, auth portals, mailing lists, etc.)
+BLOCKED_HOSTS_EXACT = {
+    "gitlab.ics.uci.edu",
+    "svn.ics.uci.edu",
+    "wiki.ics.uci.edu",
+    "swiki.ics.uci.edu",
+    "mailman.ics.uci.edu",
+    "helpdesk.ics.uci.edu",
+    "password.ics.uci.edu",
+    "netreg.ics.uci.edu",
+    "observium.ics.uci.edu",
+    "pgadmin.ics.uci.edu",
+    "speedtest.ics.uci.edu",
+    "ngs.ics.uci.edu",
+}
+
+# In case of variants like git.ics.uci.edu, support.ics.uci.edu, etc.
+BLOCKED_HOST_HINTS = (
+    "gitlab", "git.", "svn", "wiki", "swiki",
+    "mailman", "pipermail",
+    "helpdesk", "support",
+    "password", "netreg",
+    "observium", "pgadmin", "speedtest",
+    "intranet", "staging", "archive-beta",
+)
+
 BLOCKED_EXTENSIONS = (
     # Assets & Media
     ".css", ".js", ".mjs", ".map", ".wasm",
@@ -48,10 +75,10 @@ BLOCKED_EXTENSIONS = (
 HARD_BLOCK_QUERY_KEYS = {
     # Calendar / Date Traps
     "day", "month", "year", "date", "time",
-    "tribe_bar_date", "tribe_event_display", "eventDate", "start_date", "end_date", "ical",
+    "tribe_bar_date", "tribe_event_display", "eventdate", "start_date", "end_date", "ical",
 
     # Functional / Low Info Pages
-    "print", "printable", "download", "attachment", "preview", 
+    "print", "printable", "download", "attachment", "preview",
     "fullscreen", "mobile", "view_mode",
     "diff", "oldid", "action", "mode",
 
@@ -76,23 +103,31 @@ HARD_BLOCK_QUERY_KEYS = {
 PAGINATION_KEYS = {"page", "p", "pg", "paged", "start", "offset", "limit", "per_page"}
 MAX_PAGE_NUMBER = 20
 MAX_START_OFFSET = 500
+MAX_LIMIT = 100
 
 TRAP_PATH_HINTS = (
+    # WP internals / feeds
     "wp-json", "wp-admin", "wp-includes", "wp-content",
     "feed", "rss", "atom", "cgi-bin",
+
+    # Auth/admin/apis
     "login", "logout", "signin", "signout",
     "admin", "api", "graphql",
+
+    # Facets/aggregations (often low-info sets)
     "search", "tag", "tags", "category", "categories",
     "archive", "archives", "author", "authors",
+
+    # Static asset dirs
     "uploads", "assets", "static", "media",
-    
-    # GitLab / Code Browsing Traps
-    "tree", "blob", "commit", "commits", "compare", "network", "graph",
-    
-    # Calendar / Infinite Date Traps
-    "calendar", "events", "agenda", "schedule", "bitstream", "retrieve",
-    
-    # Low Info / Auto-generated Docs
+
+    # Git/code browsing (path-level)
+    "tree", "blob", "raw", "blame",
+    "commit", "commits", "compare", "diff", "patch",
+    "network", "graph", "history",
+    "merge_requests", "issues",
+
+    # Low-info auto-generated docs / infra dashboards
     "mailman", "pipermail", "javadoc", "doxygen", "epydoc", "apidocs",
     "ganglia", "nagios", "mrtg",
 )
@@ -116,17 +151,20 @@ def is_valid(url: str) -> bool:
     if not is_allowed_domain(host):
         return False
 
-    # --- THE NUCLEAR OPTION ---
-    # Explicitly block GitLab. This kills the entire site tree.
-    if "gitlab" in host:
+    # Host-level blocks (biggest crawl-budget savers)
+    if host in BLOCKED_HOSTS_EXACT:
         return False
-    # --------------------------
+    for hint in BLOCKED_HOST_HINTS:
+        if hint in host:
+            return False
 
     path = (parsed.path or "").lower()
 
+    # Block common non-HTML resources by extension
     if any(path.endswith(ext) for ext in BLOCKED_EXTENSIONS):
         return False
 
+    # Avoid extremely long URLs (often traps)
     if len(url) > 300:
         return False
 
@@ -135,12 +173,12 @@ def is_valid(url: str) -> bool:
         return False
     if path_depth(path) > 10:
         return False
-    
-    # --- Block date-based archive/calendar paths ---
-    # Detects patterns like /2023/12/ or /2023-12/
+
+    # Block obvious date-archive style paths (e.g., /2023/12/ or /2023-12/)
     if re.search(r"/\d{4}[-/]\d{2}/", path):
         return False
 
+    # Trap-ish path hints
     for hint in TRAP_PATH_HINTS:
         if f"/{hint}/" in path or path.endswith(f"/{hint}"):
             return False
@@ -149,23 +187,27 @@ def is_valid(url: str) -> bool:
     query = parsed.query or ""
     if query:
         qs = parse_qs(query, keep_blank_values=True)
-        keys = {k.lower(): k for k in qs.keys()}
+        keys = {k.lower(): k for k in qs.keys()}  # lower -> original
 
-        for k in keys:
-            if "[" in k or "]" in k:
+        # WordPress-style filter keys: foo[0]=bar (infinite combinations)
+        for k_lower in keys:
+            if "[" in k_lower or "]" in k_lower:
                 return False
 
+        # Too many params -> combinatorial explosion
         if len(keys) > 4:
             return False
 
-        for k in keys:
-            if k in HARD_BLOCK_QUERY_KEYS:
+        # Hard block keys
+        for k_lower in keys:
+            if k_lower in HARD_BLOCK_QUERY_KEYS:
                 return False
 
+        # Pagination limits
         if not pagination_within_limits(qs, keys):
             return False
 
-        # Block combinatorial sorting/filtering/viewing
+        # Block combinatorial sorting/filtering/view modes (two or more together)
         combinatorial = {"sort", "order", "filter", "facet", "action", "view", "layout"}
         present = [k for k in keys if k in combinatorial]
         if len(present) >= 2:
@@ -184,6 +226,12 @@ def is_allowed_domain(host: str) -> bool:
 
 
 def pagination_within_limits(qs: dict, keys: dict) -> bool:
+    has_page = any(k in keys for k in {"page", "p", "pg", "paged"})
+    has_offset = any(k in keys for k in {"start", "offset"})
+    # If both styles appear, it's usually a trap
+    if has_page and has_offset:
+        return False
+
     for k_lower, original_key in keys.items():
         if k_lower not in PAGINATION_KEYS:
             continue
@@ -195,12 +243,16 @@ def pagination_within_limits(qs: dict, keys: dict) -> bool:
         except Exception:
             return False
 
-        if k_lower in {"page", "p", "pg"}:
+        if k_lower in {"page", "p", "pg", "paged"}:
             if v > MAX_PAGE_NUMBER:
                 return False
-        else:
+        elif k_lower in {"start", "offset"}:
             if v > MAX_START_OFFSET:
                 return False
+        elif k_lower in {"limit", "per_page"}:
+            if v > MAX_LIMIT:
+                return False
+
     return True
 
 
@@ -209,17 +261,16 @@ def has_repeating_path_segments(path: str) -> bool:
     if len(segments) < 3:
         return False
 
-    # Check immediate triple repetition
     for i in range(len(segments) - 2):
         if segments[i] == segments[i + 1] == segments[i + 2]:
             return True
 
-    # Check total frequency of any segment
     counts = {}
     for s in segments:
         counts[s] = counts.get(s, 0) + 1
         if counts[s] >= 6:
             return True
+
     return False
 
 

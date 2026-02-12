@@ -8,8 +8,7 @@ ALLOWED_DOMAINS = (
     "stat.uci.edu",
 )
 
-# Block whole subdomains / host patterns that are clearly low-value for this assignment
-# (repos, wikis, infra dashboards, auth portals, mailing lists, etc.)
+# Block low-value subdomains (repos, wikis, infra dashboards, auth portals, mailing lists, etc.)
 BLOCKED_HOSTS_EXACT = {
     "gitlab.ics.uci.edu",
     "svn.ics.uci.edu",
@@ -151,7 +150,7 @@ def is_valid(url: str) -> bool:
     if not is_allowed_domain(host):
         return False
 
-    # Host-level blocks (biggest crawl-budget savers)
+    # Block disallowed hosts
     if host in BLOCKED_HOSTS_EXACT:
         return False
     for hint in BLOCKED_HOST_HINTS:
@@ -164,7 +163,7 @@ def is_valid(url: str) -> bool:
     if any(path.endswith(ext) for ext in BLOCKED_EXTENSIONS):
         return False
 
-    # Avoid extremely long URLs (often traps)
+    # Avoid extremely long URLs
     if len(url) > 300:
         return False
 
@@ -174,7 +173,7 @@ def is_valid(url: str) -> bool:
     if path_depth(path) > 10:
         return False
 
-    # Block obvious date-archive style paths (e.g., /2023/12/ or /2023-12/)
+    # Block obvious date-archive style paths 
     if re.search(r"/\d{4}[-/]\d{2}/", path):
         return False
 
@@ -189,12 +188,12 @@ def is_valid(url: str) -> bool:
         qs = parse_qs(query, keep_blank_values=True)
         keys = {k.lower(): k for k in qs.keys()}  # lower -> original
 
-        # WordPress-style filter keys: foo[0]=bar (infinite combinations)
+        # Block array-style query params (often filter traps)
         for k_lower in keys:
             if "[" in k_lower or "]" in k_lower:
                 return False
 
-        # Too many params -> combinatorial explosion
+        # Too many params
         if len(keys) > 4:
             return False
 
@@ -207,7 +206,7 @@ def is_valid(url: str) -> bool:
         if not pagination_within_limits(qs, keys):
             return False
 
-        # Block combinatorial sorting/filtering/view modes (two or more together)
+        # Block combinatorial sorting/filter modes
         combinatorial = {"sort", "order", "filter", "facet", "action", "view", "layout"}
         present = [k for k in keys if k in combinatorial]
         if len(present) >= 2:

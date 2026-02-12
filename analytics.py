@@ -5,7 +5,7 @@ from urllib.parse import urlparse, urldefrag
 
 from bs4 import BeautifulSoup
 
-# keep your STOP_WORDS as-is
+# STOP WORD list
 STOP_WORDS = {
     "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at",
     "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could",
@@ -23,79 +23,69 @@ STOP_WORDS = {
     "yourselves"
 }
 
+# thread lock to prevent race conditions, 防止多線程導致混亂
 _lock = RLock()
 
-# --- analytics globals ---
-_unique_urls = set()
-_word_counter = Counter()
-_subdomain_counter = Counter()
-_longest_url = None
+# global analytics
+_unique_urls = set() # set of all uniqer urls
+_word_counter = Counter() # count word frequency
+_subdomain_counter = Counter() # count pages per sub domian
+_longest_url = None # url with most word
 _longest_word_count = 0
 
-# --- duplication globals (from scratch) ---
+# duplication globals
 _exact_fingerprints = set()     # exact duplicate detection
-_simhash_fps = []               # store simhash values (ints)
-_near_duplicate_count = 0
+_simhash_fps = []               # store simhash values for near duplicate check
+_near_duplicate_count = 0		# counter for how many duplicate found
 
-# bucket index for near-dup speedup
-# key: (band_id, band_value) -> list of simhash indices
+# 將64位simhash分為4段，每段16位，如果兩個hash在任意一段完全相同->candidate for duplication
 _bucket_index = {}
 
-# --- tuning knobs ---
+# tuning knobs
 SIMHASH_BITS = 64
-# near-dup threshold (typical: 3~6 for 64-bit; 2 is VERY strict)
+# near-dup threshold 
 NEAR_DUP_THRESHOLD = 4
 
-# split 64-bit into 4 bands of 16-bit
+# split 64-bit into 4 bands of 16-bit, 加速查找
 BAND_BITS = 16
 BAND_COUNT = SIMHASH_BITS // BAND_BITS
 BAND_MASK = (1 << BAND_BITS) - 1
 
-
-# ---------------------------
-# from-scratch hashing utilities
-# ---------------------------
-
 def _fnv1a_64_bytes(data: bytes) -> int:
-    """FNV-1a 64-bit (from scratch)."""
-    h = 1469598103934665603  # offset basis
+    """FNV-1a 64-bit， hash algorithm"""
+    h = 1469598103934665603  # offset basis 初始偏移
     prime = 1099511628211
     for b in data:
         h ^= b
-        h = (h * prime) & ((1 << 64) - 1)
+        h = (h * prime) & ((1 << 64) - 1) # multiply and mask to 64 bits
     return h
 
 def _fnv1a_64_str(s: str) -> int:
+    """wrapper to hash a string directly"""
     return _fnv1a_64_bytes(s.encode("utf-8", errors="ignore"))
 
 def _hamming_distance_64(a: int, b: int) -> int:
     x = a ^ b
-    # Python 3.8+: fast popcount
+    # caluculate number of differing bits between two integers. 
     return x.bit_count()
 
-
-# ---------------------------
 # html -> text
-# ---------------------------
-
 def _html_to_text(html_content: bytes) -> str:
+    """extract visible text from html bytes"""
     if not html_content:
         return ""
     if isinstance(html_content, bytes):
-        html_str = html_content.decode("utf-8", errors="ignore")
+        html_str = html_content.decode("utf-8", errors="ignore") # ignore bad chars
     else:
         html_str = str(html_content)
 
     soup = BeautifulSoup(html_str, "html.parser")
     return soup.get_text(separator=" ", strip=True)
 
-
-# ---------------------------
 # tokenization + weights (no Counter for duplication)
-# ---------------------------
 
 def _tokenize(text: str):
-    tokens = re.findall(r"[a-zA-Z0-9]+", text.lower())
+    tokens = re.findall(r"[a-zA-Z0-9]+", text.lower()) #只保留字母數字，轉小寫
     out = []
     for t in tokens:
         if len(t) > 1 and t not in STOP_WORDS:
@@ -108,27 +98,18 @@ def _term_frequencies(tokens):
         tf[t] = tf.get(t, 0) + 1
     return tf
 
-
-# ---------------------------
-# exact fingerprint (lecture-style "fingerprint")
-# ---------------------------
-
+# exact fingerprint 
 def _normalize_for_fingerprint(tokens):
     """
-    Deterministic normalization for exact duplicate detection.
-    Keep it cheap: join tokens with spaces (already lowercased and stopword-filtered).
+    Join tokens with spaces (already lowercased and stopword-filtered).
     """
-    # You can also cap length to keep hashing time bounded on huge pages.
     return " ".join(tokens[:5000])
 
 def _compute_exact_fingerprint(tokens) -> int:
     norm = _normalize_for_fingerprint(tokens)
     return _fnv1a_64_str(norm)
 
-
-# ---------------------------
-# simhash (from scratch)
-# ---------------------------
+# simhash implementation
 
 def _compute_simhash(tf: dict, bits=SIMHASH_BITS) -> int:
     if not tf:
@@ -192,16 +173,13 @@ def _index_simhash(simhash_fp: int, idx: int) -> None:
         else:
             _bucket_index[key].append(idx)
 
-
-# ---------------------------
 # main entry: called by Worker
-# ---------------------------
 
 def process_page(url: str, html_content: bytes) -> bool:
     """
     Returns:
-      True  => OK to scrape links from this page
-      False => do NOT scrape links (duplicate / near-duplicate)
+      True: OK to scrape links from this page
+      False:do not scrape links (duplicate / near-duplicate)
     """
     global _longest_url, _longest_word_count, _near_duplicate_count
 
@@ -217,7 +195,7 @@ def process_page(url: str, html_content: bytes) -> bool:
     parsed = urlparse(url)
     host = (parsed.netloc or "").lower().split(":")[0]
 
-    # duplication signals (from scratch)
+    # duplication signals
     tf = _term_frequencies(tokens)
     exact_fp = _compute_exact_fingerprint(tokens)
     simhash_fp = _compute_simhash(tf)
@@ -225,14 +203,14 @@ def process_page(url: str, html_content: bytes) -> bool:
     should_scrape = True
 
     with _lock:
-        # -------- exact duplicate ----------
+        # exact duplicate
         if exact_fp in _exact_fingerprints:
             _near_duplicate_count += 1
             should_scrape = False
         else:
             _exact_fingerprints.add(exact_fp)
 
-            # -------- near duplicate ----------
+            # near duplicate
             if _is_near_duplicate(simhash_fp):
                 _near_duplicate_count += 1
                 should_scrape = False
@@ -241,7 +219,7 @@ def process_page(url: str, html_content: bytes) -> bool:
                 _simhash_fps.append(simhash_fp)
                 _index_simhash(simhash_fp, idx)
 
-        # -------- analytics bookkeeping (allowed to use libs) ----------
+        # analytics bookkeeping
         if url not in _unique_urls:
             _unique_urls.add(url)
             if host == "uci.edu" or host.endswith(".uci.edu"):

@@ -20,7 +20,10 @@ STOP_WORDS = {
     "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't",
     "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's",
     "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself",
-    "yourselves"
+    "yourselves", 
+    
+    "markellekelly" #project-specific noise tokens
+    
 }
 
 # thread lock to prevent race conditions, 防止多線程導致混亂
@@ -85,9 +88,12 @@ def _html_to_text(html_content: bytes) -> str:
 # tokenization + weights (no Counter for duplication)
 
 def _tokenize(text: str):
-    tokens = re.findall(r"[a-zA-Z0-9]+", text.lower()) #只保留字母數字，轉小寫
+    tokens = re.findall(r"[a-zA-Z0-9]+", text.lower())  #只保留字母數字，轉小寫
     out = []
     for t in tokens:
+        # Filter pure numbers (years like 2021, 2022, and fragments like 01/02/...)
+        if t.isdigit():
+            continue
         if len(t) > 1 and t not in STOP_WORDS:
             out.append(t)
     return out
